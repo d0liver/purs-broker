@@ -6,14 +6,13 @@ module Broker (
 import Prelude
 
 import Data.Array ((:))
-import Data.Either (Either(..))
-import Data.Maybe (Maybe(..))
 import Effect (Effect)
 import Effect.Exception (throw)
 import Foreign.Generic.Class (class Decode, class Encode)
 import InMemoryStore (Key, get, exists, (:=))
 import InMemoryStore as M
-import Partial.Unsafe (unsafeCrashWith)
+import Broker.Either.Util (whenLeftM)
+import Broker.Maybe.Util (whenNothing)
 
 newtype Broker = Broker Key
 type EventInfo a = {
@@ -25,20 +24,13 @@ newtype Event a = Event (EventInfo a)
 
 broker :: Key -> Effect Broker
 broker k = do
-  b <- exists k
-  when b $
-    -- This shouldn't normally happen so I'm okay throwing here.
-    throw $
-      "Tried to allocate a broker to a key, '"
-      <> k <> "', that was already defined."
-
-  let brk = Broker k
-  -- Initialize the broker here to prevent double initializations later. The
-  -- type of the array here is a lie, but it doesn't actually matter and
+  -- Initialze the broker if it hasn't been init'd.
+  -- The type of the array here is a lie, but it doesn't actually matter and
   -- spelling it correctly would probably require the use of proxies and shit
   -- for no particular reason.
-  k := ([] :: Array Unit)
-  pure brk
+  unlessM (exists k) (k := ([] :: Array Unit))
+
+  pure (Broker k)
 
 flush :: Effect Unit
 flush = M.flush
@@ -57,17 +49,16 @@ emit b@(Broker k) name dat = do
   k := (e : store)
 
 getS :: ∀ a. Decode a => Encode a => Broker -> Effect (Array (EventInfo a))
-getS (Broker k) = do
-  f <- get k
-  maybeStore <- case f of
-    Left errs -> throw ("Failed to decode EventInfo from the memory store: " <> show errs)
-    Right r -> pure r
-  case maybeStore of
-    Nothing ->
-      unsafeCrashWith $
-        "Tried to get a value, but the broker hadn't been initialized."
-        <> " This shouldn't happen."
-    Just store -> pure store
+getS (Broker k) = whenLeftM (get k) decodeErr >>= (flip whenNothing) initErr
+  where
+  initErr =
+    throw $
+      "Tried to get a value, but the broker hadn't been initialized."
+      <> " This shouldn't happen."
+  decodeErr errs =
+    throw $
+      "Failed to decode EventInfo from the memory store: "
+      <> show errs
 
 events :: ∀ a. Encode a => Decode a => Broker -> Effect (Array (EventInfo a))
 events b = getS b
