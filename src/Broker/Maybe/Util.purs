@@ -1,4 +1,4 @@
-module Maybe.Util (
+module Broker.Maybe.Util (
   whenJust, whenNothing,
   whenJustM, whenNothingM
 ) where

@@ -1,4 +1,4 @@
-module Either.Util where
+module Broker.Either.Util where
 
 import Prelude
 import Data.Either (Either(..), either)
